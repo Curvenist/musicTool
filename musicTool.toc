@@ -1,0 +1,14 @@
+## Interface: 100002
+## Title: musicTool
+## Author: Fixer
+## Version: 1.0
+## SavedVariablesPerCharacter: customPlaylist
+
+libs/*
+
+core/const.lua
+core/globalMethods.lua
+core/musicPlayer.lua
+core/file.lua
+
+files/Playlists.lua
