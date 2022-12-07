@@ -2,15 +2,22 @@ musicPlayer = {
 	List = {},
 	Playlist = {},
 	ExternalDB = {},
-	delayer = {},
-	repeater = false,
-	autoLoadNextPlaylist = false,
-	probTimeCycle = nil,
 
-	songspec = {
-		count = nil, -- track number
-		mustimer = nil, -- setting a chronometer before delayer takes place
-		currentsong = nil -- our track id / name
+	delayer = {
+		min = nil,
+		max = nil
+	},
+
+	typeRepeater = nil, -- 0 = play list once  / 1 = repeat playlist / 2 = repeat same / 3 = can load next playlist
+	probTimeCycle = nil,
+	chronodelayer = nil,
+	start = false, -- just to know if a song has been started
+	isRandom = false,
+
+	currentSong = {
+		count = nil, -- track number in playlist
+		mustimer = nil, -- setting a chronodelayer before delayer takes place
+		track = nil -- our track id / name
 	},
 
 	currentTime = {
@@ -27,8 +34,7 @@ function musicPlayer:main()
 
 	local RawConfig = Customdb:main("config.json")
 	self:setDelayer(RawConfig["delayer"])
-	self:setRepeater(RawConfig["repeater"])
-	self:setAutoLoadNextPlaylist(RawConfig["autoLoadNextPlaylist"])
+	self:setTypeRepeater(RawConfig["typeRepeater"])
 	self:setprobTimeCycle(RawConfig["probTimeCycle"]["min"], RawConfig["probTimeCycle"]["max"])
 
 end
@@ -44,7 +50,7 @@ function musicPlayer:execPlaylistLoadout(playlist) -- playlist.json
 
 end
 
--- all setters parameters for playlists type
+-- all setters / getters parameters for playlists type
 function musicPlayer:setDelayer(min, max) -- set a delayer between songs
 	min = min or 0
 	max = max or 0
@@ -58,12 +64,47 @@ function musicPlayer:setDelayer(min, max) -- set a delayer between songs
 	}
 end
 
-function musicPlayer:setRepeater(boolean) -- set a repeater for songs - bypasses probTimeCycle
-	self.repeater = boolean
+function musicPlayer:getDelayer(param)
+	if param ~= nil then
+		return self.delayer[param]
+	end
+	return self.delayer
 end
 
-function musicPlayer:setAutoLoadNextPlaylist(boolean) -- jump to next playlist in current self.List
-	self.autoLoadNextPlaylist = boolean
+function musicPlayer:setChronoDelayer(value)
+	self.chronodelayer = value
+end
+
+function musicPlayer:getChronoDelayer()
+	return self.chronodelayer
+end
+
+
+function musicPlayer:setTypeRepeater(number) -- set a typeRepeater for songs - bypasses probTimeCycle
+	self.typeRepeater = number
+end
+
+function musicPlayer:getTypeRepeater()
+	return self.typeRepeater
+end
+
+function musicPlayer:setIsRandom(boolean)
+	self.isRandom = boolean
+end
+
+function musicPlayer:getIsRandom()
+	return self.isRandom
+end
+
+function musicPlayer:setCurrentSong(param, value)
+	self.currentSong[param] = value
+end
+
+function musicPlayer:getCurrentSong(param)
+	if param ~= nil then
+		return self.currentSong[param]
+	end
+	return self.currentSong
 end
 
 -- in case we get datad / datan, we can set up a probability of playling day or night songs
@@ -85,8 +126,7 @@ function musicPlayer:getPlaylist(playlist)
 	end
 	return {}
 end
--- string.find(k, "n")
--- 	
+
 function musicPlayer:getDataSong(playlist) 
 	local isCycling = self:roll(self:getProbTimeCycle(), 1) -- the probability of day cycling song playing
 
@@ -108,22 +148,32 @@ function musicPlayer:getDataSong(playlist)
 	
 end
 
-function musicPlayer:getSong(playlist, isNext, number)
+function musicPlayer:getSong(playlist, isNext, number, isRandom)
 	local data = self:getDataSong(playlist) -- loading the array of id / names
-	if isNext and self.songspec["count"] >= #self:getPlaylist(playlist)[data] or not isNext and number < 1 then -- in case we have extra border array values, we set to 0 to avoid errors
-		isNext = not isNext
-		if isNext then number = 0
-		else number = #self:getPlaylist(playlist)[data] - 1 end
+
+	if isRandom then
+		self:setCurrentSong("count", math.random(0, #self:getPlaylist(playlist)[data]))
+		self:setCurrentSong("track", self:getPlaylist(playlist)[data][self:getCurrentSong("count")])
+		return
 	end
+
+	if isNext and self:getCurrentSong("count") >= #self:getPlaylist(playlist)[data] then -- in case we have extra border array values, we set to 0 to avoid errors
+		number = 0	
+	elseif not isNext and number < 1 then
+		number = #self:getPlaylist(playlist)[data] + 1
+	end
+
 	if isNext then
-		self.songspec["count"] = number + 1
+		self:setCurrentSong("count", number + 1)
 	else
-		self.songspec["count"] = number - 1
+		self:setCurrentSong("count", number - 1)
 	end
 	
-	self.songspec["currentsong"] = self:getPlaylist(playlist)[data][self.songspec["count"]] -- our song is picked, we can play it
-	
+	self:setCurrentSong("track", self:getPlaylist(playlist)[data][self:getCurrentSong("count")]) -- our song is picked, we can play it
+	return
 end
+
+
 
 
 -- end all setters for playlist type of playing
@@ -139,7 +189,6 @@ function musicPlayer:roll(min, max)
 end
 
 
-
 function musicPlayer:timeDayCheck()
 	self.currentTime["hours"], self.currentTime["min"] = GetGameTime()
 	if self.currentTime["hours"] >= 18 and self.currentTime["hours"] <= 6 then -- @todo careful for english time
@@ -151,37 +200,64 @@ end
 
 
 
--- our custom Player
+-- our custom Player direct commands
 function musicPlayer:PlayMusic(song)
 	song = song or nil
 	if song ~= nil then
 		PlayMusic(song)
+		self.start = true
 	end
 end
 
+function musicPlayer:StopMusic()
+	StopMusic()
+end
 
-function musicPlayer:Play(playlist, isNext, number)
+
+-- our music player main functionnality
+function musicPlayer:Play(playlist, isNext, number, isRandom)
 	-- first, we need to know wich time we have for datad and datan in order to take whats wanted
 	isNext = isNext or true
-	if self.songspec["count"] == nil then
-		self.songspec["count"] = 0
+	isRandom = isRandom or self:getIsRandom()
+
+	if self:getCurrentSong("count") == nil then
+		self:setCurrentSong("count", 0)
 	end
-	number = number or self.songspec["count"]
+	number = number or self:getCurrentSong("count")
 	self:timeDayCheck()
 
-	if self.Playlist == nil then
+	if self:getPlaylist(playlist) == nil then
 		self:execPlaylistLoadout(playlist)
 	end
 
 	-- loading our song
-	self:getSong(playlist, isNext, number)
+	self:getSong(playlist, isNext, number, isRandom)
 
-	if self.repeater then
-		self:PlayMusic(self.songspec["currentsong"])
+	-- if has repeater, we just load music and it plays without anymore actions
+	if self:getTypeRepeater() == 2 then
+		self:PlayMusic()
 	end
-		if self.timer > chronometer then
+
+	-- Our player timing function
+	local wait = CreateFrame("Frame")
+	self:setChronodelayer(GetTime() + 60 + math.random(self:getDelayer("min"), self:getDelayer("max")))
+
+	wait:SetScript("OnUpdate", function()
+		if self:getChronodelayer() > GetTime() and self.start then
+			-- stopSong!
+			self:StopMusic()
+			SetCVar("Sound_EnableMusic", 0)
+			self.start = false
+
+			if self:getTypeRepeater() ~= 2 then -- if not repeat self, start a new song
+				SetCVar("Sound_EnableMusic", 1)
+				self:getSong(playlist, true, number, isRandom)
+			end
+		elseif not self.start then
+			self:PlayMusic(self:getCurrentSong("track"))
 		end
-	end
+
+	end)
 
 end
 

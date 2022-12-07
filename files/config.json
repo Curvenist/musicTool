@@ -1,9 +1,8 @@
 {
 	"delayer" : {
 		"min" : 15,
-		"max" : 35
+		"max" : 60
 	},
-	"repeater" : false,
-	"autoLoadNextPlaylist" : false,
+	"typeRepeater" : 1,
 	"hastimecycle" : 60
 }
