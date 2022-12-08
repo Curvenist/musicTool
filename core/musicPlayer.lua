@@ -8,23 +8,25 @@ musicPlayer = {
 		max = nil
 	},
 
-	typeRepeater = nil, -- 0 = play list once  / 1 = repeat playlist / 2 = repeat same / 3 = can load next playlist
+	typeRepeater = nil, -- 0 = play playlist once  / 1 = repeat playlist / 2 = repeat same / 3 = jump to next playlist
 	probTimeCycle = nil,
-	chronodelayer = nil,
+	timeline = nil,
+	chronoDelayer = nil,
 	start = false, -- just to know if a song has been started
 	isRandom = false,
 
 	currentSong = {
 		count = nil, -- track number in playlist
-		mustimer = nil, -- setting a chronodelayer before delayer takes place
+		mustimer = nil, -- setting a timeline before delayer takes place
 		track = nil -- our track id / name
 	},
 
 	currentTime = {
 		hours = nil,
 		min = nil
-	}
+	},
 	
+	wait = nil
 	
 }
 
@@ -71,12 +73,20 @@ function musicPlayer:getDelayer(param)
 	return self.delayer
 end
 
-function musicPlayer:setChronoDelayer(value)
-	self.chronodelayer = value
+function musicPlayer:settimeline(value)
+	self.timeline = value
+end
+
+function musicPlayer:gettimeline()
+	return self.timeline
+end
+
+function musicPlayer:setchronodelayer(value)
+	self.chronoDelayer = value
 end
 
 function musicPlayer:getChronoDelayer()
-	return self.chronodelayer
+	return self.chronoDelayer
 end
 
 
@@ -133,7 +143,7 @@ function musicPlayer:getDataSong(playlist)
 	for k, v in pairs(self:getPlaylist(playlist)) do
 		if k == "data" then -- no day and night cycle
 			return k
-		elseif self:getProbTimeCycle() ~= nil then // we're going to check the prob playing the other track for this next one!
+		elseif self:getProbTimeCycle() ~= nil then -- we're going to check the prob playing the other track for this next one!
 			if self:timeDayCheck() and string.match(k, "n$") ~= nil and isCycling then -- day lookging for night => if got day, and k is datan, and cycle is true : take this data instead
 				return k
 			elseif not self:timeDayCheck() and string.match(k, "d$") ~= nil and isCycling then -- reversed
@@ -151,12 +161,16 @@ end
 function musicPlayer:getSong(playlist, isNext, number, isRandom)
 	local data = self:getDataSong(playlist) -- loading the array of id / names
 
+	-- full random
 	if isRandom then
-		self:setCurrentSong("count", math.random(0, #self:getPlaylist(playlist)[data]))
-		self:setCurrentSong("track", self:getPlaylist(playlist)[data][self:getCurrentSong("count")])
+		self:setCurrentSong("count", math.random(0, #self:getPlaylist(playlist)[data][1]))
+
+		self:setCurrentSong("track", self:getPlaylist(playlist)[data][1][self:getCurrentSong("count")])
+		self:setCurrentSong("mustimer", #self:getPlaylist(playlist)[data][2])
 		return
 	end
 
+	-- not random, but if data is cycled, next song can be selected in the other data => cf getDataSong
 	if isNext and self:getCurrentSong("count") >= #self:getPlaylist(playlist)[data] then -- in case we have extra border array values, we set to 0 to avoid errors
 		number = 0	
 	elseif not isNext and number < 1 then
@@ -169,7 +183,8 @@ function musicPlayer:getSong(playlist, isNext, number, isRandom)
 		self:setCurrentSong("count", number - 1)
 	end
 	
-	self:setCurrentSong("track", self:getPlaylist(playlist)[data][self:getCurrentSong("count")]) -- our song is picked, we can play it
+	self:setCurrentSong("track", self:getPlaylist(playlist)[data][1][self:getCurrentSong("count")]) -- our song is picked, we can play it
+	self:setCurrentSong("mustimer", #self:getPlaylist(playlist)[data][2])
 	return
 end
 
@@ -199,7 +214,6 @@ function musicPlayer:timeDayCheck()
 end
 
 
-
 -- our custom Player direct commands
 function musicPlayer:PlayMusic(song)
 	song = song or nil
@@ -207,10 +221,12 @@ function musicPlayer:PlayMusic(song)
 		PlayMusic(song)
 		self.start = true
 	end
+	return
 end
 
 function musicPlayer:StopMusic()
 	StopMusic()
+	return
 end
 
 
@@ -233,39 +249,50 @@ function musicPlayer:Play(playlist, isNext, number, isRandom)
 	-- loading our song
 	self:getSong(playlist, isNext, number, isRandom)
 
-	-- if has repeater, we just load music and it plays without anymore actions
-	if self:getTypeRepeater() == 2 then
-		self:PlayMusic()
-	end
-
 	-- Our player timing function
-	local wait = CreateFrame("Frame")
-	self:setChronodelayer(GetTime() + 60 + math.random(self:getDelayer("min"), self:getDelayer("max")))
+	self.wait = CreateFrame("Frame")
+	
+	self.wait:SetScript("OnUpdate", function()
+		-- if has repeater, we just load music and it plays without anymore actions
+		if self:getTypeRepeater() == 2 and not self.start then
+			self:setchronodelayer(math.random(self:getDelayer("min"), self:getDelayer("max")))
+			self:settimeline(GetTime() + self:getCurrentSong("mustimer"))
+			self:PlayMusic(self:getCurrentSong("track")) -- just once, music automatically plays loops :)
+		else
+			if not self.start then -- starting music
 
-	wait:SetScript("OnUpdate", function()
-		if self:getChronodelayer() > GetTime() and self.start then
-			-- stopSong!
-			self:StopMusic()
-			SetCVar("Sound_EnableMusic", 0)
-			self.start = false
+				self:setchronodelayer(math.random(self:getDelayer("min"), self:getDelayer("max")))
+				self:settimeline(GetTime() + self:getCurrentSong("mustimer"))
+				self:PlayMusic(self:getCurrentSong("track"))
 
-			if self:getTypeRepeater() ~= 2 then -- if not repeat self, start a new song
-				SetCVar("Sound_EnableMusic", 1)
-				self:getSong(playlist, true, number, isRandom)
-			end
-		elseif not self.start then
-			self:PlayMusic(self:getCurrentSong("track"))
+			elseif self.start and self:gettimeline() < GetTime() then -- timeline
+				
+				-- stopSong!
+				self:StopMusic()
+				SetCVar("Sound_EnableMusic", 0)
+				self.start = false
+
+			elseif self.start and self:gettimeline() + self:getChronoDelayer() < GetTime()  then -- adding the delayer in timeline
+
+			end	
+
+		
 		end
-
 	end)
+	self.wait:UnregisterEvent("OnUpdate")
 
 end
 
 function musicPlayer:reset()
-
+	
 end
 
 
 function musicPlayer:UnloadPlaylist()
 	self.List = {}
+end
+
+if self:getTypeRepeater() ~= 0 then -- if not repeat self, start a new song
+	SetCVar("Sound_EnableMusic", 1)
+	self:getSong(playlist, true, number, isRandom)
 end
