@@ -4,5 +4,6 @@
 		"max" : 60
 	},
 	"typeRepeater" : 1,
-	"hastimecycle" : 60
+	"hastimecycle" : 60,
+	"isRandom" : false
 }
